@@ -9,6 +9,7 @@ import {
   CameraPhoto,
   Capacitor,
   FilesystemDirectory,
+  FilesystemEncoding,
 } from '@capacitor/core';
 
 //define constant to act as the key for the storage
@@ -24,33 +25,58 @@ export function usePhotoGallery() {
     photo: CameraPhoto, //object
     fileName: string
   ): Promise<Photo> => {
-    const base64Data = await base64FromPath(photo.webPath!);
+    let base64Data: string;
+    //'hybrid' will detect Cordova or Capacitor
+    if (isPlatform('hybrid')) {
+      const file = await readFile({
+        path: photo.path!,
+      });
+      base64Data = file.data;
+    } else {
+      base64Data = await base64FromPath(photo.webPath!);
+    }
     const savedFile = await writeFile({
       path: fileName,
       data: base64Data,
       directory: FilesystemDirectory.Data,
     });
-    // Use webPath to display the new image instead of base64 since it's
-    // already loaded into memory
-    return {
-      filepath: fileName,
-      webviewPath: photo.webPath,
-    };
+
+    if (isPlatform('hybrid')) {
+      // Display the new image by rewriting the 'file://' path to HTTP
+      // Details: https://ionicframework.com/docs/building/webview#file-protocol
+      return {
+        filepath: savedFile.uri,
+        webviewPath: Capacitor.convertFileSrc(savedFile.uri),
+      };
+    } else {
+      // Use webPath to display the new image instead of base64 since it's
+      // already loaded into memory
+      return {
+        filepath: fileName,
+        webviewPath: photo.webPath,
+      };
+    }
   };
 
   useEffect(() => {
     const loadSaved = async () => {
       const photoString = await get('photos');
-      const photos = (photoString ? JSON.parse(photoString) : []) as Photo[];
+      const photosInStorage = (photoString
+        ? JSON.parse(photoString)
+        : []) as Photo[];
 
-      for (let photo of photos) {
-        const file = await readFile({
-          path: photo.filepath,
-          directory: FilesystemDirectory.Data,
-        });
-        photo.base64 = `data:image/jpeg;base64,${file.data}`;
+      if (!isPlatform('hybrid')) {
+        // if mobile
+        for (let photo of photosInStorage) {
+          const file = await readFile({
+            path: photo.filepath,
+            directory: FilesystemDirectory.Data,
+          });
+          // Web platform only: Save the photo into the base64 field
+          photo.base64 = `data:image/jpeg;base64,${file.data}`;
+        }
       }
-      setPhotos(photos);
+      setPhotos(photosInStorage);
     };
     loadSaved(); // we have to call the async function from within the hook as the hook callback can't be asynchronous itself.
   }, [get, readFile]);
@@ -72,15 +98,17 @@ export function usePhotoGallery() {
     //adding set call to save the photos array. now data persists if the app is closed.
     set(
       PHOTO_STORAGE,
-      JSON.stringify(
-        newPhotos.map((p) => {
-          //don't save the base64 representation of the photo data,
-          //since it's already saved on the filesystem
-          const photoCopy = { ...p };
-          delete photoCopy.base64;
-          return photoCopy;
-        })
-      )
+      isPlatform('hybrid')
+        ? JSON.stringify(newPhotos)
+        : JSON.stringify(
+            newPhotos.map((p) => {
+              //don't save the base64 representation of the photo data,
+              //since it's already saved on the filesystem
+              const photoCopy = { ...p };
+              delete photoCopy.base64;
+              return photoCopy;
+            })
+          )
     );
   };
 
