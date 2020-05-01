@@ -21,6 +21,22 @@ export function usePhotoGallery() {
   const { get, set } = useStorage(); //access the get and set methods from the useStorage hook.
   const [photos, setPhotos] = useState<Photo[]>([]);
 
+  const deletePhoto = async (photo: Photo) => {
+    //Remove this photo from the Photos reference data array
+    const newPhotos = photos.filter((p) => p.filepath !== photo.filepath);
+
+    //update photos array cache by overwriting the existing photo array
+    set(PHOTO_STORAGE, JSON.stringify(newPhotos));
+
+    //delete photo file from filesystem.
+    const filename = photo.filepath.substr(photo.filepath.lastIndexOf('/') + 1);
+    await deleteFile({
+      path: filename,
+      directory: FilesystemDirectory.Data,
+    });
+    setPhotos(newPhotos);
+  };
+
   const savePicture = async (
     photo: CameraPhoto, //object
     fileName: string
@@ -66,7 +82,6 @@ export function usePhotoGallery() {
         : []) as Photo[];
 
       if (!isPlatform('hybrid')) {
-        // if mobile
         for (let photo of photosInStorage) {
           const file = await readFile({
             path: photo.filepath,
@@ -115,6 +130,7 @@ export function usePhotoGallery() {
   return {
     takePhoto,
     photos,
+    deletePhoto,
   };
 }
 
